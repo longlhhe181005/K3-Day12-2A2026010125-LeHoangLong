@@ -15,9 +15,10 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from functools import lru_cache
+from pathlib import Path
 
 from fastapi import Depends, FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from utils.mock_llm import ask_llm
@@ -32,6 +33,7 @@ from .store import ConversationStore, get_redis_client
 
 SERVICE_NAME = "day12-agent"
 SERVICE_VERSION = "1.0.0"
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -68,6 +70,14 @@ app = FastAPI(title="Day 12 Production Agent", version=SERVICE_VERSION, lifespan
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
+
+
+# ─────────────────────────────────────────────────────────────
+# UI — trang chat tĩnh, không phải một phần checkpoint
+# ─────────────────────────────────────────────────────────────
+@app.get("/", include_in_schema=False)
+def ui():
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 # ─────────────────────────────────────────────────────────────
