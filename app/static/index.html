@@ -47,6 +47,33 @@
     font-size: 12px;
     color: var(--muted);
   }
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+  .dot.ok { background: #3ecf8e; }
+  .dot.bad { background: var(--error); }
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .stats strong { color: var(--text); }
   .config {
     padding: 12px 20px;
     border-bottom: 1px solid var(--border);
@@ -148,7 +175,16 @@
   <header>
     <h1>Day 12 Production Agent</h1>
     <p>Gọi trực tiếp vào <code>/ask</code> — cần API key hợp lệ.</p>
+    <div class="status">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">đang kiểm tra service…</span>
+    </div>
   </header>
+
+  <div class="stats" id="stats" hidden>
+    <div>Ngân sách tháng: <strong id="statBudget">—</strong></div>
+    <div>Rate limit: <strong id="statRate">—</strong></div>
+  </div>
 
   <div class="config">
     <div>
@@ -184,6 +220,45 @@
   apiKeyEl.addEventListener("change", () => localStorage.setItem("day12_api_key", apiKeyEl.value));
   userIdEl.addEventListener("change", () => localStorage.setItem("day12_user_id", userIdEl.value));
 
+  // ── Trạng thái service: poll /health + /ready định kỳ ──────────
+  const statusDot = document.getElementById("statusDot");
+  const statusText = document.getElementById("statusText");
+
+  async function checkStatus() {
+    try {
+      const [health, ready] = await Promise.all([
+        fetch("/health").then((r) => r.ok),
+        fetch("/ready").then((r) => r.ok),
+      ]);
+      if (health && ready) {
+        statusDot.className = "dot ok";
+        statusText.textContent = "service khỏe · Redis kết nối được";
+      } else if (health) {
+        statusDot.className = "dot bad";
+        statusText.textContent = "service sống nhưng chưa ready (Redis?)";
+      } else {
+        statusDot.className = "dot bad";
+        statusText.textContent = "service không phản hồi";
+      }
+    } catch {
+      statusDot.className = "dot bad";
+      statusText.textContent = "không gọi được service";
+    }
+  }
+  checkStatus();
+  setInterval(checkStatus, 15000);
+
+  // ── Thanh số liệu: ngân sách + rate limit, cập nhật sau mỗi /ask ──
+  const statsEl = document.getElementById("stats");
+  const statBudget = document.getElementById("statBudget");
+  const statRate = document.getElementById("statRate");
+
+  function updateStats(data) {
+    statsEl.hidden = false;
+    statBudget.textContent = `$${data.budget.spent.toFixed(6)} / $${data.budget.limit}`;
+    statRate.textContent = `${data.rate_limit.remaining}/${data.rate_limit.limit} request còn lại phút này`;
+  }
+
   function clearEmptyState() {
     const empty = log.querySelector(".empty");
     if (empty) empty.remove();
@@ -217,6 +292,7 @@
     questionEl.value = "";
     sendBtn.disabled = true;
 
+    const startedAt = performance.now();
     try {
       const headers = { "Content-Type": "application/json" };
       if (apiKey) headers["X-API-Key"] = apiKey;
@@ -227,17 +303,21 @@
         headers,
         body: JSON.stringify({ question }),
       });
+      const latencyMs = Math.round(performance.now() - startedAt);
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         const detail = data.detail || res.statusText;
-        addBubble("error", `${res.status}: ${detail}`);
+        addBubble("error", `${res.status}: ${detail} · ${latencyMs}ms`);
         return;
       }
 
-      const meta = `cost $${data.cost_usd} · tokens in=${data.tokens.in} out=${data.tokens.out} · history=${data.history_length}`;
+      const meta =
+        `cost $${data.cost_usd} · tokens in=${data.tokens.in} out=${data.tokens.out} · ` +
+        `history=${data.history_length} · ${latencyMs}ms`;
       addBubble("assistant", data.answer, meta);
+      updateStats(data);
     } catch (err) {
       addBubble("error", "Không gọi được server: " + err.message);
     } finally {

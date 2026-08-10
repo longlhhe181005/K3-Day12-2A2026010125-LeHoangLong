@@ -169,7 +169,7 @@ def ask(
 
     store.append(user_id, "user", payload.question)
     store.append(user_id, "assistant", result["answer"])
-    guard.record(user_id, result["cost_usd"])
+    total_spent = guard.record(user_id, result["cost_usd"])
 
     log_event(
         "ask_completed",
@@ -179,12 +179,16 @@ def ask(
         cost_usd=result["cost_usd"],
     )
 
+    remaining_requests = max(0, limiter.limit - limiter.hit_count(user_id))
+
     return {
         "answer": result["answer"],
         "user_id": user_id,
         "history_length": len(history),
         "cost_usd": result["cost_usd"],
         "tokens": {"in": result["tokens_in"], "out": result["tokens_out"]},
+        "rate_limit": {"remaining": remaining_requests, "limit": limiter.limit},
+        "budget": {"spent": total_spent, "limit": guard.budget},
     }
 
 
